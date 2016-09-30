@@ -1,0 +1,18 @@
+3
+giwrgos	6666
+mitsos	6667
+giannis	6668
+
+1500  giwrgos  	launch
+2000  mitsos  	launch
+16500 giwrgos   i_am_interested
+17600 mitsos	i_am_interested
+17600 giannis	launch
+26000 giwrgos	bid 99
+26500 giannis	bid 101
+27000 mitsos	bid 200
+28000 giwrgos	list_high_bid
+48500 giannis   i_am_interested
+50000 giannis	list_description
+70000 giwrgos	quit
+80000 giannis	bid 47

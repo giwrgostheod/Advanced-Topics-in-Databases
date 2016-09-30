@@ -1,0 +1,87 @@
+package AuctionHouse;
+
+import java.io.BufferedReader;
+import java.io.FileReader;
+import java.io.IOException;
+import java.sql.Connection;
+import java.sql.DriverManager;
+import java.sql.SQLException;
+import java.sql.Statement;
+import java.util.logging.Logger;
+
+public class InputParser {
+		private Connection c = null;
+		private static BufferedReader br = null;
+		public int timeInterval, numItems;
+		
+		public void OpenConnection(String dbName){
+			try {
+				Class.forName("org.postgresql.Driver");
+				c = DriverManager.getConnection("jdbc:postgresql://localhost:5432/"+dbName,"george", "lowfunded93");
+				System.out.println("Connected to database"+dbName+"successfully!");
+			} 
+			catch (Exception e) {
+				e.printStackTrace();
+				System.err.println(e.getClass().getName()+": "+e.getMessage());
+				System.exit(0);
+			}
+		}
+		
+		public void CloseConnection(){
+			try{
+				c.close();
+				System.out.println("Closing connection.");
+			} catch (Exception e){
+				e.printStackTrace();
+			}
+		}
+		
+		public boolean InsertToTable(String table, String fields, String values)
+		{
+			try {
+		        // Prepare a statement to update a record
+				Statement stmt = c.createStatement();
+				String sql = "INSERT INTO "+table+" ("+fields+") VALUES ("+values+")";
+				int result = stmt.executeUpdate(sql);
+		        if (result > 0){
+		        	System.out.println("Insert is completed correctly.");
+		        	return true;
+		        }
+		        else{
+		        	System.out.println("Error on Insert into "+table+" fields "+fields+" values "+values);
+		        	return false;
+		        }
+		    } 
+			catch (SQLException e) {
+		    	System.out.println("update error:" + e.getMessage());
+		        return false;
+		    }
+		}
+		
+		public void updateDatabaseFromFile(String dbName, String confFile) throws NumberFormatException, IOException{
+			br = new BufferedReader(new FileReader(confFile));
+			String line = "";
+			String[] lineArray;
+			InputParser parser = new InputParser();
+			parser.OpenConnection(dbName);
+			timeInterval = Integer.parseInt(br.readLine());	
+		    numItems = Integer.parseInt(br.readLine());	
+	
+			while ((line = br.readLine()) != null) {
+				lineArray = line.split(" ", 2);
+				int sprice = Integer.parseInt(lineArray[0]);
+				int fprice = sprice-1;				
+				parser.InsertToTable("Items","item_description,starting_price,final_price,item_owner", "'"+lineArray[1]+"','"+sprice+"','"+fprice+"','"+Constants.no_holder+"'");
+			}	        
+			parser.CloseConnection();
+		}
+		
+		public int getNumItems(){
+			return this.numItems;
+		}
+		
+		public int getTimeInterval(){
+			return this.timeInterval;
+		}
+}
+	   

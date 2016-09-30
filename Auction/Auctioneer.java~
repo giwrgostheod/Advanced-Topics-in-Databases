@@ -1,0 +1,337 @@
+//package AuctionHouse;
+
+import java.net.*;
+import java.nio.ByteBuffer;
+import java.nio.CharBuffer;
+import java.nio.channels.SelectionKey;
+import java.nio.channels.Selector;
+import java.nio.channels.ServerSocketChannel;
+import java.nio.channels.SocketChannel;
+import java.nio.charset.Charset;
+import java.sql.SQLException;
+import java.util.ArrayList;
+import java.util.HashMap;
+import java.util.Iterator;
+import java.util.Map;
+import java.util.Set;
+import java.util.concurrent.BrokenBarrierException;
+import java.util.concurrent.CyclicBarrier;
+import java.util.logging.Logger;
+import java.io.*;
+
+
+public class Auctioneer extends Observer implements Runnable{
+	private ServerSocketChannel serverSocket;
+    private int port;
+    private int peerPort;
+	private Auctioneer auctioneer;
+	private SocketChannel peerChannel;
+	private Selector selector;
+	    
+    public HashMap<SocketChannel,String> activeChannels;
+    public HashMap<String,SocketChannel> revActiveChannels;
+    public ArrayList<String> interestedUsers = new ArrayList<String>();
+    public String itemDescription;
+    public boolean commandFlag;
+    public boolean bidFlag;
+    public Subject syncObject;
+    public String SName;
+    public int time_interval;//time L for all the actions
+    public int interval_L;
+    CyclicBarrier barrier;
+    public String dbName;
+    public Logger logger = null;
+    public String confFile;
+	
+	   public Auctioneer(int port,Subject syncObject,String SName,CyclicBarrier barrier,String confFile) throws IOException
+	   {
+		   this.port = port;
+		   this.syncObject=syncObject;
+		   this.SName=SName;
+		   this.barrier=barrier;
+		   this.syncObject.attach(this);
+		   this.confFile=confFile;
+	   }
+
+	   public void run()
+	   {
+		   
+			System.out.println("Auctioneer starting ...");
+			//initialize variables, databases and logs.
+			String logFile = "";
+			switch (SName){
+				case "Server1": dbName="auctionDB1";logFile="server1.log";break;
+				case "Server2": dbName="auctionDB2";logFile="server2.log";break;
+				case "Server3": dbName="auctionDB3";logFile="server3.log";break;
+			}			
+			try {
+				logger = new LogCreator(logFile).returnLogger();
+			} catch (SecurityException e) {
+				// TODO Auto-generated catch block
+				e.printStackTrace();
+			} catch (IOException e) {
+				// TODO Auto-generated catch block
+				e.printStackTrace();
+			}						
+			//logger.info("Reading data from input file...");
+			InputParser myParser = new InputParser();
+			try {
+				int wtime=0;
+				if (SName.equals("Server2"))
+					wtime=500;
+				else if (SName.equals("Server3"))
+					wtime=1000;
+				try {
+					Thread.sleep(wtime);
+				} catch (InterruptedException e) {
+					// TODO Auto-generated catch block
+					e.printStackTrace();
+				}
+				myParser.updateDatabaseFromFile(dbName, confFile);
+			} catch (NumberFormatException e2) {
+				// TODO Auto-generated catch block
+				e2.printStackTrace();
+			} catch (IOException e2) {
+				// TODO Auto-generated catch block
+				e2.printStackTrace();
+			}
+			interval_L = myParser.getTimeInterval();
+			
+			JDBController dbController = new JDBController(dbName);
+			activeChannels=new HashMap();
+			revActiveChannels=new HashMap();
+			time_interval=interval_L;
+			commandFlag=false;
+			bidFlag=false;
+			itemDescription="no item yet";
+			ItemController icon=new ItemController(this,barrier);			
+			try {
+				barrier.await();
+			} catch (InterruptedException e2) {
+				// TODO Auto-generated catch block
+				e2.printStackTrace();
+			} catch (BrokenBarrierException e2) {
+				// TODO Auto-generated catch block
+				e2.printStackTrace();
+			}
+			//logger.info("Successfully updated "+dbName+" from input file. Starting Item Controller...");
+			icon.start();
+			//
+			
+	        // Get selector
+	        Selector selector;
+			try {
+				selector = Selector.open();
+		        System.out.println("Selector open: " + selector.isOpen());
+		        // Get server socket channel and register with selector
+		        ServerSocketChannel serverSocket = ServerSocketChannel.open();
+		        InetSocketAddress hostAddress = new InetSocketAddress("192.168.1.71", port);
+		        serverSocket.bind(hostAddress);
+		        serverSocket.configureBlocking(false);
+		        int ops = serverSocket.validOps();
+		        SelectionKey selectKy = serverSocket.register(selector, ops, null);
+		        for (;;) {
+
+		            //System.out.println("Waiting for select...");
+		            int noOfKeys = selector.select();
+		            //System.out.println("Number of selected keys: " + noOfKeys);
+		            Set selectedKeys = selector.selectedKeys();		           
+		            Iterator iter = selectedKeys.iterator();
+		            		            
+		            while (iter.hasNext()) {
+		                SelectionKey ky = (SelectionKey) iter.next();
+		                if (ky.isAcceptable()) {
+		                    // Accept the new client connection
+		                    SocketChannel client;
+							try {
+								client = serverSocket.accept();
+			                    client.configureBlocking(false);
+			                    // Add the new connection to the selector
+			                    client.register(selector, SelectionKey.OP_READ);
+			                    System.out.println("Accepted new connection from client: " + client);
+							} catch (IOException e) {
+								// TODO Auto-generated catch block
+								e.printStackTrace();
+							}
+		                }
+		                else if (ky.isReadable()) {
+		                    // Read the data from client
+		                    SocketChannel client = (SocketChannel) ky.channel();
+		                    ByteBuffer buffer = ByteBuffer.allocate(256);
+		                    client.read(buffer);
+		                    String output = new String(buffer.array()).trim();
+		                    System.out.println("Message read from client: " + output);
+		        	        
+		                    String[] parts = output.split(" ");
+		        	        String part1 = parts[0];
+		                    //handleMessages(output);
+		                    if (output.equals(Constants.list_high_bid)) {
+		                    	int itemId = 1; 			//ItemsArrayList.getCurrentItemId;
+		                    	String highestBid="";
+		        				try {
+		        					highestBid = Integer.toString(dbController.getCurrentBid(itemDescription));
+		        				} catch (SQLException e) {
+		        					// TODO Auto-generated catch block
+		        					e.printStackTrace();
+		        				}
+		        				send(client,"Current highest bid:" + highestBid);
+		                    }
+		        	        else if (output.equals(Constants.list_description)){
+		        	        	send(client,"Description of current item:" + itemDescription);
+		        	        }
+		                    else if ((output.equals(Constants.quit))||(output.equals(""))) {
+		                    	String bidder=activeChannels.get(client);
+		        				try {
+		        					String bid=activeChannels.get(client);
+			                    	activeChannels.remove(client);
+			                    	revActiveChannels.remove(bidder);
+		        					boolean flag = false;
+		        					flag = dbController.deleteBidder(bid);
+		        					if (!flag)
+		        						System.out.println("error in deleting bidder!");
+		        				} 
+		        				catch (SQLException e) {
+		        					// TODO Auto-generated catch block
+		        					e.printStackTrace();
+		        				}
+		                        client.close();
+		                        System.out.println("Client messages are complete; close.");
+		                    }
+		                    else if (part1.equals("bid")){
+		                    	String name=activeChannels.get(client);
+		                    	if ((bidFlag)&&(interestedUsers.contains(name))){
+			        	        	int amount=-1;
+			        	        	boolean flag = false;			        	        	
+			        	        	try{
+			        	        		amount = Integer.parseInt(parts[1]);
+			        	        		int currentBid = dbController.getCurrentBid(itemDescription);
+			        	        		/* Update only on strictly higher bid! */
+			        	        		if (amount > currentBid){
+			        	        			send(client,"Your bid has been accepted.\n");
+			        	        			send(client,"You bidded: " + amount);
+			        	        			syncObject.setState(amount,name,itemDescription);
+			        	        		}
+			        	        		else
+			        	        			send(client,"Your bid has been rejected.\n");	
+			        	        	} 
+			        	        	catch(NumberFormatException e){
+			        	        		send(client,"You haven't entered a number: ");		        		
+			        	        	} 
+			        	        	catch (SQLException e) {
+			        					// TODO Auto-generated catch block
+			        					e.printStackTrace();
+			        				}			        	        				        	        				        	        				        	        	
+		                    	}
+		                    	else{
+		                    		send(client,"You cannot bid at this time.");
+		                    	}			        	        	
+		                    }
+		                    else if (part1.equals("connect")){
+		                    	String name = parts[1];
+		                    	try {		                			
+		                			boolean flag = false;
+		                			flag = dbController.isDuplicate(name);
+		                			if ((!flag)&&(!name.equals("no_holder"))){
+		                				flag = dbController.insertBidder(name, 1);
+		                				send(client,"Success on registering!");
+		                			}
+		                			else{
+		                				send(client,Constants.duplicate_name);
+		                				client.close();
+		                			}
+		                		} catch (IOException e1) {
+		                			// TODO Auto-generated catch block
+		                			e1.printStackTrace();
+		                		}
+		                        catch (SQLException e) {
+		                			// TODO Auto-generated catch block
+		                			e.printStackTrace();
+		                		}
+			                    activeChannels.put(client,name);
+			                    revActiveChannels.put(name, client);
+		                    }
+		                    if (commandFlag){
+		                    	if (output.equals(Constants.i_am_interested)){
+		                    		String name=activeChannels.get(client);
+		                    		if (!interestedUsers.contains(name)){
+		                    		interestedUsers.add(name);
+		                    		}
+		                    	}
+		                    }
+		                } // end if (ky...)
+		                iter.remove();
+		            } // end while loop
+		        } // end for loop
+
+			} catch (IOException e) {
+				// TODO Auto-generated catch block
+				e.printStackTrace();
+			}
+	   	    
+	   }
+
+	   protected void send(SocketChannel channel, String message) throws IOException {	
+			byte [] mes = new String(message).getBytes();
+	        ByteBuffer buffer = ByteBuffer.wrap(mes);
+			channel.write(buffer);
+	        buffer.clear();
+	   }	
+	   
+	    public void broadcast(String message)
+	    {
+	    	CharBuffer buffer;
+	    	for (SocketChannel channel : activeChannels.keySet())
+	    	{
+	    		buffer = CharBuffer.wrap(message);
+	    		try {
+	    			while (buffer.hasRemaining())
+	    				channel.write(Charset.defaultCharset().encode(buffer));
+	    		} catch (IOException e) {
+	    			//e.printStackTrace();
+	    		}
+	    		buffer.clear();
+	    	}
+	    }
+	    
+	    public void broadcastInterested(String message)
+	    {
+	    	CharBuffer buffer;
+	    	for (String name : interestedUsers)
+	    	{	
+	    		SocketChannel channel=revActiveChannels.get(name);
+	    		buffer = CharBuffer.wrap(message);
+	    		try {
+	    			while (buffer.hasRemaining())
+	    				channel.write(Charset.defaultCharset().encode(buffer));
+	    		} catch (IOException e) {
+
+	    		}
+	    		buffer.clear();
+	    	}
+	    }
+	 
+	   private void handleMessages(String output) {
+		// TODO Auto-generated method stub
+		
+	   }
+	@Override
+	public void update() {
+		// TODO Auto-generated method stub
+		JDBController dbController = new JDBController(dbName);
+		try {
+			boolean flag = dbController.updateItemBid(itemDescription, syncObject.getUsername(), syncObject.getAmount());
+		} catch (SQLException e) {
+			// TODO Auto-generated catch block
+			e.printStackTrace();
+		}
+		
+		System.out.println(SName+":New high bid");		
+		String message=Constants.new_high_bid+"@"+syncObject.getUsername()+"@"+syncObject.getAmount();
+		time_interval=interval_L;
+		logger.info(SName+":"+Constants.new_high_bid+"  from user ["+syncObject.getUsername()+"] is "+syncObject.getAmount()+" for "+itemDescription);
+
+		broadcastInterested(message);	
+	}
+	   	
+}
+

@@ -1,0 +1,20 @@
+4
+giwrgos	6666
+mitsos	6667
+giannis	6668
+kwstas 	6668
+
+1500  giwrgos  	launch
+2000  mitsos  	launch
+2000  kwstas 	launch
+2500  giannis	launch
+16500 giwrgos   i_am_interested
+17600 mitsos	i_am_interested
+17700 giannis	i_am_interested
+17800 kwstas	i_am_interested
+26500 giwrgos	bid 100
+26500 giannis	bid 101
+50000 giwrgos	quit
+50000 kwstas	quit
+50000 giannis	quit
+55000 mitsos	quit
